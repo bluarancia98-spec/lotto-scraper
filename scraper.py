@@ -4,11 +4,13 @@ import requests
 from bs4 import BeautifulSoup
 
 def get_latest_draw_no():
-    """동행복권 메인 페이지에서 가장 최근 회차 번호를 알아냅니다."""
+    """동행복권 메인 페이지에서 가장 확실하게 최신 회차 번호를 알아냅니다."""
     try:
         url = "https://dhlottery.co.kr/common.do?method=main"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
         response = requests.get(url, headers=headers, timeout=15)
+        response.encoding = 'EUC-KR' # 💡 한글 깨짐 완벽 방지
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         draw_no_tag = soup.find('strong', id='lottoDrwNo')
         if draw_no_tag:
@@ -48,11 +50,14 @@ def scrape_stores(draw_no):
     
     try:
         response = requests.post(url, data=data, headers=headers, timeout=15)
+        response.encoding = 'EUC-KR' # 💡 동행복권 배출점 페이지 한글 깨짐 완벽 방지
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         stores_data = []
         
         tables = soup.find_all('table', class_='tbl_data')
         if not tables:
+            print("1등 당첨점 테이블을 찾지 못했습니다. 구조 변경 확인 필요.")
             return []
             
         rows = tables[0].find('tbody').find_all('tr')
@@ -63,6 +68,7 @@ def scrape_stores(draw_no):
                 store_type = cols[2].text.strip()
                 address = cols[3].text.strip()
                 
+                # 데이터가 없는 경우의 처리
                 if name and "결과가 없습니다" not in name:
                     stores_data.append({
                         "name": name,
@@ -75,7 +81,9 @@ def scrape_stores(draw_no):
         return []
 
 if __name__ == "__main__":
+    print("크롤러 로봇 가동 시작...")
     latest_no = get_latest_draw_no()
+    
     if latest_no:
         print(f"발견된 최신 회차: {latest_no}회")
         
@@ -83,7 +91,6 @@ if __name__ == "__main__":
         stores_list = scrape_stores(latest_no)
         
         if basic_info:
-            # 흩어져 있던 정보를 하나의 JSON으로 완벽하게 결합
             full_data = basic_info.copy()
             full_data["stores"] = stores_list
             
@@ -92,6 +99,8 @@ if __name__ == "__main__":
             
             with open(file_path, 'w', encoding='utf-8') as f:
                 json.dump(full_data, f, ensure_ascii=False, indent=2)
-            print(f"성공: {file_path} 파일 생성 완료 (당첨점 {len(stores_list)}곳 포함)")
+            print(f"✅ 성공: {file_path} 파일 생성 완료 (당첨점 {len(stores_list)}곳 포함)")
         else:
-            print("기본 당첨 정보를 가져오지 못해 저장하지 않았습니다.")
+            print("❌ 오류: 기본 당첨 정보를 가져오지 못해 데이터를 저장하지 않았습니다.")
+    else:
+        print("❌ 오류: 최신 회차를 파악하지 못했습니다.")
