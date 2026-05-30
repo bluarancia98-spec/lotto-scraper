@@ -1,0 +1,41 @@
+name: Lotto Auto Scraper
+
+on:
+  schedule:
+    # 한국 시간 기준 매주 토요일 오후 9시 10분에 자동 실행됩니다. (UTC 기준 토요일 12시 10분)
+    - cron: '10 12 * * 6'
+  workflow_dispatch: # 버튼을 눌러서 수동으로 강제 실행할 수 있게 해주는 마법의 설정입니다.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 로봇이 파일을 저장소에 덮어쓸 수 있도록 허락해 줍니다.
+
+    steps:
+    - name: 1. 내 저장소 파일 가져오기
+      uses: actions/checkout@v3
+
+    - name: 2. 파이썬 설치하기
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 3. 크롤링에 필요한 도구 설치하기
+      run: |
+        pip install requests beautifulsoup4
+
+    - name: 4. 파이썬 크롤러 로봇 실행하기
+      run: python scraper.py
+
+    - name: 5. 수집된 JSON 데이터를 깃허브에 자동 저장하기
+      run: |
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+        git add data/*.json || true
+        if git diff --staged --quiet; then
+          echo "새로 업데이트된 데이터가 없습니다."
+        else
+          git commit -m "Auto Update: 최신 1등 배출점 데이터 갱신 완료"
+          git push
+        fi
