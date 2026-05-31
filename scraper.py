@@ -6,94 +6,79 @@ from datetime import datetime, timezone, timedelta
 # 동행복권 공식 API URL
 LOTTO_API_URL = "https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo="
 
-def get_latest_drawn_round():
-    """
-    외부 라이브러리(pytz, requests) 없이 파이썬 내장 모듈만으로
-    가장 최근에 추첨이 완료된 로또 회차 데이터를 완벽하게 찾아냅니다.
-    """
-    # 파이썬 내장 기능을 활용한 한국 표준시(KST) 설정
-    kst = timezone(timedelta(hours=9))
-    now_kst = datetime.now(kst)
-    
-    # 1회차 추첨일(2002년 12월 7일) 기준
-    reference_date = datetime(2002, 12, 7, tzinfo=kst)
-    
-    # 경과 일수를 7일로 나누어 현재 예상 회차 계산
-    days_passed = (now_kst - reference_date).days
-    estimated_round = (days_passed // 7) + 1
-
-    target_round = estimated_round
-
-    # 최대 5주 전까지 역추적하며 실제 '추첨 완료' 데이터가 있는지 검증
-    for _ in range(5):
-        try:
-            url = f"{LOTTO_API_URL}{target_round}"
-            # urllib를 사용하여 외부 라이브러리(requests) 없이 통신
-            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            
-            with urllib.request.urlopen(req, timeout=10) as response:
-                if response.status == 200:
-                    data = json.loads(response.read().decode('utf-8'))
-                    
-                    # 'success' 반환 시 (실제 당첨 결과가 발표된 회차)
-                    if data.get("returnValue") == "success":
-                        return data
-                        
-            # 'fail' 반환 시 (아직 미추첨) -> 회차를 -1 하여 이전 회차 재검색
-            target_round -= 1
-        except Exception as e:
-            print(f"[Error] 통신 중 오류 발생: {e}")
-            target_round -= 1
-
+def fetch_lotto_data(round_no):
+    """API를 호출하여 특정 회차의 데이터를 가져옵니다."""
+    url = f"{LOTTO_API_URL}{round_no}"
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status == 200:
+                return json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        print(f"[Error] 통신 오류: {e}")
     return None
 
 def main():
-    print("동행복권 최신 당첨 데이터 수집을 시작합니다 (종속성 제로 버전)...")
-    data = get_latest_drawn_round()
+    print("동행복권 최신 당첨 데이터 수집을 시작합니다...")
     
-    if not data:
-        print("[Error] 유효한 로또 데이터를 가져오지 못했습니다.")
+    # 한국 표준시(KST) 설정
+    kst = timezone(timedelta(hours=9))
+    now_kst = datetime.now(kst)
+    
+    # 1회차 기준일 (2002년 12월 7일)
+    base_date = datetime(2002, 12, 7, tzinfo=kst)
+    
+    # 현재 날짜 기준으로 예상 회차 자동 계산 (5월 30일 기준 1226회 도출)
+    days_passed = (now_kst - base_date).days
+    current_round = (days_passed // 7) + 1
+
+    target_round = current_round
+    valid_data = None
+
+    # 최대 5주 전까지 역추적하며 실제 '추첨 완료' 데이터가 있는지 확실하게 검증
+    for _ in range(5):
+        data = fetch_lotto_data(target_round)
+        if data and data.get("returnValue") == "success":
+            valid_data = data
+            break
+        else:
+            print(f"{target_round}회차 데이터가 아직 없습니다. 이전 회차로 이동합니다.")
+            target_round -= 1
+
+    if not valid_data:
+        print("[Error] 유효한 로또 데이터를 찾을 수 없습니다.")
         return
 
-    draw_no = data["drwNo"]
-    
-    # KST 기준 현재 시간 (깃허브 액션 무조건 업데이트 유발용)
-    kst = timezone(timedelta(hours=9))
-    now_kst = datetime.now(kst).strftime("%Y-%m-%d %H:%M:%S")
-    
+    print(f"✅ 최종 확인된 최신 회차: {valid_data['drwNo']}회")
+
     # 앱에서 즉시 사용할 수 있도록 완벽하게 파싱된 데이터 구조
     formatted_data = {
-        "drawNo": draw_no,
-        "drawDate": data["drwNoDate"],
+        "drawNo": valid_data["drwNo"],
+        "drawDate": valid_data["drwNoDate"],
         "winningNumbers": [
-            data["drwtNo1"],
-            data["drwtNo2"],
-            data["drwtNo3"],
-            data["drwtNo4"],
-            data["drwtNo5"],
-            data["drwtNo6"]
+            valid_data["drwtNo1"], valid_data["drwtNo2"], valid_data["drwtNo3"],
+            valid_data["drwtNo4"], valid_data["drwtNo5"], valid_data["drwtNo6"]
         ],
-        "bonusNumber": data["bnusNo"],
-        "firstPrizeAmount": data["firstWinamnt"],
-        "firstPrizeWinners": data["firstPrzwnerCo"],
-        "stores": [],
-        "updateTime": f"{now_kst} (KST)"
+        "bonusNumber": valid_data["bnusNo"],
+        "firstPrizeAmount": valid_data["firstWinamnt"],
+        "firstPrizeWinners": valid_data["firstPrzwnerCo"],
+        "updateTime": now_kst.strftime("%Y-%m-%d %H:%M:%S (KST)")
     }
 
     # data 폴더 안전 생성
     os.makedirs("data", exist_ok=True)
     
-    # 1. 1225.json 등 개별 회차 파일 생성
-    filename = f"data/{draw_no}.json"
+    # 1. 1226.json 등 개별 회차 파일 생성
+    filename = f"data/{valid_data['drwNo']}.json"
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(formatted_data, f, ensure_ascii=False, indent=2)
-    print(f"[Success] {filename} 파일이 성공적으로 생성되었습니다.")
+    print(f"✅ {filename} 파일 생성 완료.")
 
     # 2. latest.json 갱신 (앱 연동용)
     latest_filename = "data/latest.json"
     with open(latest_filename, "w", encoding="utf-8") as f:
         json.dump(formatted_data, f, ensure_ascii=False, indent=2)
-    print(f"[Success] {latest_filename} 파일에 최신 데이터가 반영되었습니다.")
+    print(f"✅ {latest_filename} 파일 갱신 완료.")
 
 if __name__ == "__main__":
     main()
