@@ -16,19 +16,18 @@ jobs:
     - name: 저장소 체크아웃
       uses: actions/checkout@v4
       with:
-        ref: ${{ github.head_ref }} # 브랜치 꼬임 방지
+        ref: ${{ github.head_ref }}
 
     - name: 파이썬 환경 설정
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: 파이썬 크롤러 실행 (데이터 생성)
+    - name: 파이썬 크롤러 실행 (우회 통신)
       run: python scraper.py
 
     - name: 오픈소스 기반 자동 커밋 및 푸시
-      # 수동 git 명령어 대신 가장 안정적인 오픈소스 라이브러리 사용
       uses: stefanzweifel/git-auto-commit-action@v5
       with:
-        commit_message: "Auto Update: 로또 1226회차 당첨 데이터 갱신"
+        commit_message: "Auto Update: 로또 최신 당첨 데이터 갱신 완료"
         file_pattern: 'data/*.json'
