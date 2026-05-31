@@ -2,11 +2,9 @@ name: Lotto Auto Scraper
 
 on:
   schedule:
-    # 매주 토요일 오후 8시 50분 (KST 기준) 자동 실행
     - cron: '50 11 * * 6'
-  workflow_dispatch: # 수동 실행 버튼 활성화
+  workflow_dispatch:
 
-# 깃허브 액션이 저장소에 파일을 쓸 수 있도록 권한 부여
 permissions:
   contents: write
 
@@ -17,6 +15,8 @@ jobs:
     steps:
     - name: 저장소 체크아웃
       uses: actions/checkout@v4
+      with:
+        ref: ${{ github.head_ref }} # 브랜치 꼬임 방지
 
     - name: 파이썬 환경 설정
       uses: actions/setup-python@v5
@@ -26,13 +26,9 @@ jobs:
     - name: 파이썬 크롤러 실행 (데이터 생성)
       run: python scraper.py
 
-    - name: 생성된 데이터를 깃허브 저장소에 강제 푸시 (핵심 해결책)
-      run: |
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        
-        # data 폴더 전체를 강제로 깃허브 추적 목록에 추가합니다.
-        git add -f data/
-        
-        # 변경 사항이 있을 때만 커밋하고 푸시하여 에러를 방지합니다.
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Auto Update: 1226회차 최신 당첨 데이터 갱신" && git push origin main)
+    - name: 오픈소스 기반 자동 커밋 및 푸시
+      # 수동 git 명령어 대신 가장 안정적인 오픈소스 라이브러리 사용
+      uses: stefanzweifel/git-auto-commit-action@v5
+      with:
+        commit_message: "Auto Update: 로또 1226회차 당첨 데이터 갱신"
+        file_pattern: 'data/*.json'
