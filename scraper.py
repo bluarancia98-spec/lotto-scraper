@@ -1,108 +1,96 @@
-import os
-import json
 import requests
-from bs4 import BeautifulSoup
-from datetime import datetime, timezone, timedelta
+import json
+import os
+from datetime import datetime
 
-# 동행복권 API 및 웹사이트 접속용 헤더 (모바일/PC 혼합 위장)
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-    'Accept': '*/*'
-}
-
-def get_expected_draw_no():
-    """네트워크 통신 없이, 수학적 날짜 계산으로 이번 주 회차를 100% 정확히 계산합니다."""
-    now_kst = datetime.now(timezone(timedelta(hours=9)))
-    # 로또 1회차 추첨일: 2002년 12월 7일 20시 45분
-    base_date = datetime(2002, 12, 7, 20, 45, tzinfo=timezone(timedelta(hours=9)))
+def get_latest_draw_no():
+    """
+    현재 날짜를 기준으로 가장 최신 로또 회차를 계산합니다.
+    (동행복권 1회차: 2002년 12월 7일 기준)
+    """
+    first_draw_date = datetime(2002, 12, 7)
+    today = datetime.now()
+    days_passed = (today - first_draw_date).days
+    latest_draw = (days_passed // 7) + 1
     
-    diff_days = (now_kst - base_date).days
-    draw_no = (diff_days // 7) + 1
-    
-    # 토요일 저녁 8시 45분 이전이라면 아직 추첨 전이므로 직전 회차로 설정
-    if now_kst.weekday() == 5 and (now_kst.hour < 20 or (now_kst.hour == 20 and now_kst.minute < 45)):
-        draw_no -= 1
+    # 토요일(weekday:5) 오후 8시 45분(추첨시간) 이전이거나 일~금요일인 경우 아직 이번주 추첨 전이므로 1을 뺌
+    if today.weekday() < 5 or (today.weekday() == 5 and today.hour < 21):
+        latest_draw -= 1
         
-    return draw_no
+    return latest_draw
 
-def fetch_basic_info(draw_no):
-    """공식 JSON API로 당첨 번호 획득 (가장 차단 확률이 낮음)"""
+def fetch_lotto_data(draw_no):
+    """
+    동행복권 공식 API를 사용하여 특정 회차의 당첨 번호를 가져옵니다.
+    """
+    # 동행복권 공식 API URL
     url = f"https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo={draw_no}"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+
     try:
-        res = requests.get(url, headers=HEADERS, timeout=10)
-        data = res.json()
-        if data.get('returnValue') == 'success':
-            return {
-                "drawNo": data.get('drwNo'),
-                "drawDate": data.get('drwNoDate'),
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+
+        # API 호출 성공 여부 확인
+        if data.get("returnValue") == "success":
+            result = {
+                "drawNo": data.get("drwNo"),
+                "drawDate": data.get("drwNoDate"),
                 "winningNumbers": [
-                    data.get('drwtNo1'), data.get('drwtNo2'), data.get('drwtNo3'),
-                    data.get('drwtNo4'), data.get('drwtNo5'), data.get('drwtNo6')
+                    data.get("drwtNo1"),
+                    data.get("drwtNo2"),
+                    data.get("drwtNo3"),
+                    data.get("drwtNo4"),
+                    data.get("drwtNo5"),
+                    data.get("drwtNo6")
                 ],
-                "bonusNumber": data.get('bnusNo'),
-                "firstPrizeAmount": data.get('firstWinamnt', 0),
-                "firstPrizeWinners": data.get('firstPrzwnerCo', 0)
+                "bonusNumber": data.get("bnusNo"),
+                "firstPrizeAmount": data.get("firstWinamnt"),
+                "firstPrizeWinners": data.get("firstPrzwnerCo"),
+                "stores": [] # 배출점 정보는 구조가 복잡하여 우선 빈 배열 처리 (앱 에러 방지)
             }
-    except Exception as e:
-        print(f"기본 정보 수집 에러: {e}")
-    return None
+            return result
+        else:
+            print(f"[오류] {draw_no}회차 데이터를 찾을 수 없습니다. (아직 추첨 전이거나 데이터 없음)")
+            return None
 
-def scrape_stores(draw_no):
-    """1등 배출점 크롤링 (해외 IP 차단 시 빈 리스트 반환)"""
-    url = "https://dhlottery.co.kr/store.do?method=topStore&pageGubun=L645"
-    payload = {"drwNo": draw_no, "schKey": "all", "schVal": ""}
-    stores_data = []
-    try:
-        res = requests.post(url, data=payload, headers=HEADERS, timeout=10)
-        res.encoding = 'EUC-KR'
-        soup = BeautifulSoup(res.text, 'html.parser')
-        tables = soup.find_all('table', class_='tbl_data')
-        
-        if tables:
-            rows = tables[0].find('tbody').find_all('tr')
-            for row in rows:
-                cols = row.find_all('td')
-                if len(cols) >= 4:
-                    name = cols[1].text.strip()
-                    store_type = cols[2].text.strip()
-                    address = cols[3].text.strip()
-                    if name and "결과가 없습니다" not in name:
-                        stores_data.append({"name": name, "type": store_type, "address": address})
     except Exception as e:
-        print(f"배출점 크롤링 에러 (방화벽 차단 가능성): {e}")
-    return stores_data
+        print(f"[오류] 동행복권 서버와 통신 중 예외 발생: {e}")
+        return None
 
-if __name__ == "__main__":
-    print("🚀 Pro 크롤러 가동 시작 (절대 실패하지 않는 강제 저장 모드)")
-    
-    # 1. 무조건 타겟 회차 번호 획득
-    target_no = get_expected_draw_no()
-    print(f"🎯 공략 회차: {target_no}회")
-    
-    # 2. 데이터 수집 시도
-    basic_info = fetch_basic_info(target_no)
-    stores_list = scrape_stores(target_no)
-    
-    # 3. 데이터가 없더라도 무조건 빈 껍데기 JSON 강제 생성 (앱 방어용)
-    if not basic_info:
-        print("⚠️ 주의: 통신이 완전히 차단되었습니다. 앱 방어를 위해 강제 더미 데이터를 생성합니다.")
-        basic_info = {
-            "drawNo": target_no,
+def main():
+    # 스크린샷 기준 타겟팅 (1226회) 또는 최신 회차 자동 계산
+    # target_draw = 1226 # 특정 회차를 고정하려면 주석을 풀고 사용하세요.
+    target_draw = get_latest_draw_no() # 자동으로 항상 최신 회차를 찾도록 설정됨
+
+    print(f"[{target_draw}회차] 동행복권 로또 당첨 결과 수집 시작...")
+    lotto_data = fetch_lotto_data(target_draw)
+
+    # 데이터 수집에 실패했을 경우에만 앱 크래시 방지용 fallback 데이터 생성
+    if lotto_data is None:
+        print("데이터를 정상적으로 가져오지 못해 대기 상태의 JSON을 생성합니다.")
+        lotto_data = {
+            "drawNo": target_draw,
             "drawDate": "발표 대기중 / 통신 지연",
             "winningNumbers": [0, 0, 0, 0, 0, 0],
             "bonusNumber": 0,
             "firstPrizeAmount": 0,
-            "firstPrizeWinners": 0
+            "firstPrizeWinners": 0,
+            "stores": []
         }
-        
-    # 4. 파일 저장 로직 (이전 모델의 버그를 고친 부분: store_list가 비어있어도 무조건 저장)
-    full_data = basic_info.copy()
-    full_data["stores"] = stores_list
-    
-    os.makedirs('data', exist_ok=True)
-    file_path = f"data/{target_no}.json"
-    
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(full_data, f, ensure_ascii=False, indent=2)
-        
-    print(f"✅ 데이터 추출 및 저장 100% 완료: {file_path} (배출점: {len(stores_list)}곳)")
+
+    # 루트 디렉토리에 data 폴더 생성
+    os.makedirs("data", exist_ok=True)
+    file_path = f"data/{target_draw}.json"
+
+    # JSON 파일로 예쁘게 저장
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(lotto_data, f, ensure_ascii=False, indent=2)
+
+    print(f"✅ 데이터 저장 완료: {file_path}")
+
+if __name__ == "__main__":
+    main()
